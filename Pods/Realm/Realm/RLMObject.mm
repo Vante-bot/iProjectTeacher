@@ -156,10 +156,6 @@
     return RLMObjectFreeze(self);
 }
 
-- (instancetype)thaw {
-    return RLMObjectThaw(self);
-}
-
 - (BOOL)isFrozen {
     return _realm.isFrozen;
 }

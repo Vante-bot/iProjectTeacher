@@ -447,7 +447,7 @@ public:
     using TConditionValue = typename LeafType::value_type;
     // static const bool nullable = ColType::nullable;
 
-    template <class TConditionFunction, Action TAction, DataType::Type TDataType, bool Nullable>
+    template <class TConditionFunction, Action TAction, DataType TDataType, bool Nullable>
     bool find_callback_specialization(size_t start_in_leaf, size_t end_in_leaf)
     {
         using AggregateLeafType = typename GetLeafType<TDataType, Nullable>::type;
@@ -611,7 +611,7 @@ protected:
         return nullptr;
     }
 
-    template <Action TAction, DataType::Type TDataType, class TConditionFunction>
+    template <Action TAction, DataType TDataType, class TConditionFunction>
     static TFind_callback_specialized get_specialized_callback_3(bool is_nullable)
     {
         if (is_nullable) {
@@ -1538,9 +1538,7 @@ public:
 
     MixedNodeBase(Mixed v, ColKey column)
         : m_value(v)
-        , m_value_is_null(v.is_null())
     {
-        get_ownership();
         m_condition_column_key = column;
     }
 
@@ -1580,23 +1578,9 @@ protected:
         , m_value(from.m_value)
         , m_value_is_null(from.m_value_is_null)
     {
-        get_ownership();
     }
 
-    void get_ownership()
-    {
-        if (!m_value_is_null) {
-            if (m_value.get_type() == type_String || m_value.get_type() == type_Binary) {
-                auto bin = m_value.get_binary();
-                OwnedBinaryData tmp(bin.data(), bin.size());
-                m_buffer = std::move(tmp);
-                m_value = Mixed(m_buffer.get());
-            }
-        }
-    }
-
-    QueryValue m_value;
-    OwnedBinaryData m_buffer;
+    Mixed m_value;
     bool m_value_is_null = false;
     using LeafCacheStorage = typename std::aligned_storage<sizeof(ArrayMixed), alignof(ArrayMixed)>::type;
     using LeafPtr = std::unique_ptr<ArrayMixed, PlacementDelete>;
@@ -1614,15 +1598,15 @@ public:
     {
         TConditionFunction cond;
         for (size_t i = start; i < end; i++) {
-            QueryValue val(m_leaf_ptr->get(i));
+            Mixed val = m_leaf_ptr->get(i);
             if constexpr (realm::is_any_v<TConditionFunction, BeginsWith, BeginsWithIns, EndsWith, EndsWithIns, Like,
                                           LikeIns, NotEqualIns, Contains, ContainsIns>) {
                 // For some strange reason the parameters are swapped for string conditions
-                if (cond(m_value, val))
+                if (cond(m_value, val, m_value.is_null(), val.is_null()))
                     return i;
             }
             else {
-                if (cond(val, m_value))
+                if (cond(val, m_value, val.is_null(), m_value.is_null()))
                     return i;
             }
         }
@@ -2499,9 +2483,9 @@ public:
     {
         size_t s = start;
         while (s < end) {
-            QueryValue v1(m_leaf_ptr1->get_any(s));
-            QueryValue v2(m_leaf_ptr2->get_any(s));
-            if (TConditionFunction()(v1, v2))
+            Mixed v1 = m_leaf_ptr1->get_any(s);
+            Mixed v2 = m_leaf_ptr2->get_any(s);
+            if (TConditionFunction()(v1, v2, v1.is_null(), v2.is_null()))
                 return s;
             else
                 s++;
@@ -2601,7 +2585,18 @@ public:
 
     size_t find_first_local(size_t start, size_t end) override
     {
-        if (m_column_type == type_LinkList || m_condition_column_key.is_set()) {
+        if (m_column_type == type_Link) {
+            for (auto& key : m_target_keys) {
+                if (key) {
+                    // LinkColumn stores link to row N as the integer N + 1
+                    auto pos = static_cast<const ArrayKey*>(m_leaf_ptr)->find_first(key, start, end);
+                    if (pos != realm::npos) {
+                        return pos;
+                    }
+                }
+            }
+        }
+        else if (m_column_type == type_LinkList) {
             ArrayKeyNonNullable arr(m_table.unchecked_ptr()->get_alloc());
             for (size_t i = start; i < end; i++) {
                 if (ref_type ref = static_cast<const ArrayList*>(m_leaf_ptr)->get(i)) {
@@ -2611,17 +2606,6 @@ public:
                             if (arr.find_first(key, 0, arr.size()) != not_found)
                                 return i;
                         }
-                    }
-                }
-            }
-        }
-        else if (m_column_type == type_Link) {
-            for (auto& key : m_target_keys) {
-                if (key) {
-                    // LinkColumn stores link to row N as the integer N + 1
-                    auto pos = static_cast<const ArrayKey*>(m_leaf_ptr)->find_first(key, start, end);
-                    if (pos != realm::npos) {
-                        return pos;
                     }
                 }
             }
@@ -2646,6 +2630,7 @@ private:
     Storage m_storage;
     LeafPtr m_array_ptr;
     const ArrayPayload* m_leaf_ptr = nullptr;
+
 
     LinksToNode(const LinksToNode& source)
         : ParentNode(source)

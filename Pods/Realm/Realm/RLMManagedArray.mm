@@ -26,7 +26,6 @@
 #import "RLMProperty_Private.h"
 #import "RLMQueryUtil.hpp"
 #import "RLMRealm_Private.hpp"
-#import "RLMRealmConfiguration_Private.hpp"
 #import "RLMSchema.h"
 #import "RLMThreadSafeReference_Private.hpp"
 #import "RLMUtil.hpp"
@@ -506,23 +505,9 @@ static void RLMInsertObject(RLMManagedArray *ar, id object, NSUInteger index) {
     }
 
     RLMRealm *frozenRealm = [_realm freeze];
-    auto& parentInfo = _ownerInfo->resolve(frozenRealm);
+    auto& parentInfo = _ownerInfo->freeze(frozenRealm);
     return translateRLMResultsErrors([&] {
         return [[self.class alloc] initWithList:_backingList.freeze(frozenRealm->_realm)
-                                     parentInfo:&parentInfo
-                                       property:parentInfo.rlmObjectSchema[_key]];
-    });
-}
-
-- (instancetype)thaw {
-    if (!self.frozen) {
-        return self;
-    }
-
-    RLMRealm *liveRealm = [_realm thaw];
-    auto& parentInfo = _ownerInfo->resolve(liveRealm);
-    return translateRLMResultsErrors([&] {
-        return [[self.class alloc] initWithList:_backingList.freeze(liveRealm->_realm)
                                      parentInfo:&parentInfo
                                        property:parentInfo.rlmObjectSchema[_key]];
     });
